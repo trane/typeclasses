@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Type Classes</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif', 'Helvetica'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz', 'Gill Sans';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono', 'Consolas', 'Courier New'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+```tut:invisible
+object Parser {
+  def parse[A](s: String): Option[A] = None
+}
+```
+
+class: center, middle
+
+<h1>Type Classes</h1>
+
+Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
+
+8 Feb 2017 • Iterate!
+
+???
+
+- Hi, I'm Andrew.
+- I write software to help data scientists focus on the science and not on operational, engineering tasks
+- Before we begin, how many of you are familiar with Type-Classes or have invented your own?
+- Today I'd like to walk through what I feel is a fairly canonical use case of type classes and help you gain some confidence in applying this technique
+
+---
+
+# Goals
+
+1. Gain an intuition about **type classes**
+2. Learn a bit about type safety and making the **compiler** do some work for you
+3. Gain some confidence in applying the type class pattern in your every day code
+4. Expose yourself to some other applications of type classes
+
+???
+
+1. --- this pattern is well known in the FP Scala community and comes from the designers of Haskell to address some of the complexity issues of programming with generics
+2. --- the scala compiler is powerful - even if slow - but it comes with the benefit of being able to remove whole classes of runtime errors if you let it
+3. --- once you see the pattern, you'll start seeing how you can apply it all over the place
+4. --- this pattern encompasses entire classes of problems that are addressed in other styles of programming with multiple patterns, my hope is to show you that you can apply
+this technique to reduce the number of OO-patterns you need to memorize and help to simplify the code base
+
+Ok so let's look at a canonical use case: serializing or deserializing
+
+---
+
+# Data types
+
+```tut:silent
+case class Person(name: String, age: Int)
+case class Address(street: String, city: String, zip: Int)
+case class Account(owner: String, balance: Double)
+```
+
+???
+
+- we've defined some simple case classes that we want to be able to create from input
+
+---
+
+# API for serialization
+
+```tut:silent
+val fred = Parser.parse[Person]("Fred,44")
+val wilma = Parser.parse[Person]("Wilma,44")
+val home = Parser.parse[Address]("1234 Bryant,San Francisco,94444")
+val checking = Parser.parse[Account]("Robert,2222.42") 
+```
+
+???
+
+- we have a simple parsing problem
+- we want to be able to create instances from a string representation that delimits fields with commas
+
+---
+
+# Constraints
+
+1. The API should never throw **non-fatal** exceptions
+2. Our solution should keep track at **compile-time** which types we can parse
+3. There should be little boilerplate
+
+???
+
+1. --- so an exception like OutOfMemoryError is perfectly fine to throw, but if we see a NumberFormatException we need to handle it ourselves
+so, we'll need to handle the possibility that our input strings might not be valid representations
+2. --- we should never get a runtime failure (either in the form of an exception or a value representing a failure) because we tried to parse
+a string into a type that we don't know anything about
+3. --- boilerplate is an easy way to create technical debt and bugs
+
+---
+
+# First go
+
+```tut:silent
+trait RowParser[A] {
+  def apply(s: String): A
+}
+
+val accountParser: RowParser[Account] = new RowParser[Account] {
+  def apply(s: String): Account = s.split(",").toList match {
+    case List(owner, balance) => Account(owner, balance.toDouble)
+  }
+}
+
+val addressParser: RowParser[Address] = new RowParser[Address] {
+  def apply(s: String): Address = s.split(",").toList match {
+    case List(street, city, zip) => Address(street, city, zip.toInt)
+  }
+}
+```
+
+---
+
+# First go
+
+Now we can write the following...
+
+```tut
+accountParser("Chris Yang,2.32")
+addressParser("548 4th St,San Francisco,94107")
+```
+
+???
+
+- This is actually a pretty nice API because of scala's syntactic sugar on apply
+- further, because we are using a generic type parameter on our parser, we have a useful type (not just Any)
+- but, there are 3 problems
+
+---
+
+# Problems
+
+1. Allows non-fatal errors to be thrown
+
+---
+
+# Problems
+
+```tut:fail
+accountParser("Chris Yang,")
+accountParser("Chris Yang,Not a double")
+```
+
+---
+
+# Problems
+
+1. Allow non-fatal errors to be thrown
+2. Have to track of a `RowParser` instance for each type we want to parse
+
+---
+
+# Problems
+
+1. Allow non-fatal errors to be thrown
+2. Have to track of a `RowParser` instance for each type we want to parse
+3. We have to write a lot of boilerplate
+
+???
+
+3. --- this is closely related to 2, we have to define instnaces for every one of our case classes and
+those definitions are very repetitive
+
+---
+
+# Failing better
+
+The first problem is easy to fix...
+
+```tut:silent
+import scala.util.Try
+
+trait SaferParser[A] {
+  def apply(s: String): Option[A]
+}
+
+val accountParser: SaferParser[Account] = new SaferParser[Account] {
+  def apply(s: String): Option[Account] = s.split(",").toList match {
+    case List(owner, balance) =>
+      Try(balance.toDouble).map(Account(owner, _)).toOption
+    case _ => None
+  }
+}
+
+val addressParser: SaferParser[Address] = new SaferParser[Address] {
+  def apply(s: String): Option[Address] = s.split(",").toList match {
+    case List(street, city, zip) =>
+      Try(zip.toInt).map(Address(street, city, _)).toOption
+    case _ => None
+  }
+}
+```
+
+???
+
+- we simply represent the possiblity of failure with the option type
+- this allows us to return failures as values
+
+---
+
+# Failing better
+
+Now we simply have this:
+
+```tut
+accountParser("Chris Yang,2.32")
+addressParser("548 4th St,San Francisco,94107")
+accountParser("Chris Yang,")
+accountParser("Chris Yang,Not a double")
+```
+
+???
+
+- And now it's impossible to make our parser crash with a recoverable exception -- if the input is invalid we return a None
+- unfortunately, we still have to track a parser for each type
+
+---
+# Runtime reflection
+
+If we were writing Java or Java-flavored Scala:
+
+```tut:silent
+import scala.reflect.ClassTag
+import scala.util.Try
+
+object ReflectionParser {
+  def apply[T: ClassTag](s: String): Option[T] = Try {
+    val ctor = implicitly[ClassTag[T]].runtimeClass.getConstructors.head
+    val paramsArray = s.split(",").map(_.trim)
+    val paramsWithTypes = paramsArray.zip(ctor.getParameterTypes)
+
+    val parameters = paramsWithTypes.map {
+      case (param, cls) => cls.getName match {
+        case "int" => param.toInt.asInstanceOf[Object]
+        case "double" => param.toDouble.asInstanceOf[Object]
+        case _ =>
+          val paramConstructor = cls.getConstructor(param.getClass)
+          paramConstructor.newInstance(param).asInstanceOf[Object]
+      }
+    }
+
+    ctor.newInstance(parameters: _*).asInstanceOf[T]
+  }.toOption
+}
+```
+
+???
+
+- To handle the problem of tracking an instance of `RowParser` for every type, we might use reflection
+To solve the syntax and boilerplate issues, and this is exactly what libraries like salat and lift-json do
+
+---
+# Runtime reflection
+
+This works pretty nicely!
+
+```tut
+ReflectionParser[Address]("548 4th St,San Francisco,94107")
+ReflectionParser[Person]("Fred,44")
+ReflectionParser[Account]("Fred,22422.49")
+ReflectionParser[Account]("Chris Yang,")
+ReflectionParser[Person]("3cpo,NaN")
+```
+
+???
+
+- There is no boilerplate and it won't throw recoverable exception.
+- The only problem is that this approach knows nothing at compile time about what types it can or can't parse
+
+---
+# Runtime reflection
+
+Annoying...
+```tut
+ReflectionParser[List[Person]]("Fred,44")
+ReflectionParser[Int]("548 4th St,San Francisco,94107")
+
+trait Foo; case class Bar(a: String, b: String, i: Int) extends Foo
+ReflectionParser[Foo]("Domino,Data,1")
+```
+
+???
+
+- All of these operations fail at runtime
+- We could make this less annoying by using Try to represent failure and provide error values that would tell us
+why the operation failed (like bad input or we don't know how to parse the type), but that's still annoying
+- Since we work with libraries like this, we probably all have a sense of just how annoying this is (like salat)
+
+---
+
+# Compile-time approach
+
+What we are aiming for...
+
+Should compile
+```scala
+SaferParser[Account]("Fred,2223.43")
+```
+
+Shouldn't compile
+```scala
+trait Foo
+SaferParser[Foo]("Fred,44")
+```
+
+???
+
+- Let's go back to our saferparser, which didn't let us try to parse into types we don't know about and
+made us keep track of our parser for each type individually
+- We want to adapt it so that it doesn't make us do this tracking ourselves
+- while also not letting us try to parse any arbitrary type
+
+---
+# Compile-time approach
+
+Let's give the type a companion object with an apply method:
+
+```tut:silent
+object SaferParser {
+  def apply[A](s: String)(parser: SaferParser[A]): Option[A] = parser(s)
+}
+```
+Which let's us write:
+
+```tut
+SaferParser[Account]("Fred,1234.56")(accountParser)
+SaferParser[Address]("123 Front St,San Francisco,94111")(addressParser)
+```
+
+But not...
+
+```tut:silent:nofail
+trait Foo
+SaferParser[Foo]("123,456,Hello World")(???)
+```
+
+???
+
+- This is more verbose than our original usage, but it looks more like our target usage
+- but, on the bright side we simply can't parse a type we don't have a parser for!
+
+---
+# Compile-time approach
+
+1. It's possible to define multiple parsers for a single type
+```tut:silent:fail
+SaferParser[Account]("Fred,1234.56")(accountParser2)
+SaferParser[Account]("Fred,1234.56")(accountParser3)
+```
+
+???
+
+- Let's thing about our SaferParser values. It's possible to define multiple parser for a single type
+
+---
+# Compile-time approach
+
+1. It's possible to define multiple parsers for a single type
+```tut:silent:fail
+SaferParser[Account]("Fred,1234.56")(accountParser2)
+SaferParser[Account]("Fred,1234.56")(accountParser3)
+```
+2. Our parser is meant for a single format
+```tut:silent:fail
+SaferParser[Account]("Fred,1234.56")(theOneAccountParser)
+```
+
+???
+- but since it's meant to parse a single format that doesn't make much sense -- in fact we could imagine a kind
+of mapping from types to parser.
+
+---
+# Compile-time approach
+
+1. It's possible to define multiple parsers for a single type
+```tut:silent:fail
+SaferParser[Account]("Fred,1234.56")(accountParser2)
+SaferParser[Account]("Fred,1234.56")(accountParser3)
+```
+2. Our parser is meant for a single format
+```tut:silent:fail
+SaferParser[Account]("Fred,1234.56")(theOneAccountParser)
+```
+3. Since we have a one-to-one mapping, we can imagine some kind of mapping from `A => Parser[A]`
+```scala
+SaferParser[A]("some,thing")(A => Parser[A])
+```
+
+???
+
+- Scala's implicit values provide one way of implementing such a mapping
+
+---
+
+# Compile-time approach
+
+With a few small changes to the companion object and parsers...
+
+```tut:silent
+import scala.util.Try
+
+trait SaferParser[A] {
+  def apply(s: String): Option[A]
+}
+
+object SaferParser {
+  def apply[A](s: String)(implicit parser: SaferParser[A]): Option[A] = parser(s)
+
+  implicit val accountParser: SaferParser[Account] = new SaferParser[Account] {
+    def apply(s: String): Option[Account] = s.split(",").toList match {
+      case List(owner, balance) =>
+        Try(balance.toDouble).map(Account(owner, _)).toOption
+      case _ => None
+    }
+  }
+  
+  implicit val addressParser: SaferParser[Address] = new SaferParser[Address] {
+    def apply(s: String): Option[Address] = s.split(",").toList match {
+      case List(street, city, zip) =>
+        Try(zip.toInt).map(Address(street, city, _)).toOption
+      case _ => None
+    }
+  }
+}
+
+```
+
+???
+
+- We have simply moved the account and address parsers into the companion object and sprinkled in
+some implicit keywords
+- Now we have the usage that we want
+
+---
+# Compile-time approach
+
+And now we have the usage we want...
+```tut:invisible
+import SaferParser._
+```
+```tut:nofail
+SaferParser[Account]("Fred,1234.23")
+SaferParser[Address]("123 Bryant St,San Francisco,94517")
+
+trait Foo
+SaferParser[Foo]("123,456,Hello World!")
+```
+
+???
+
+- notice that we don't have to specify the parse instance, only the type we want to parse
+scala's implicits create the mapping from the type to the instance of the parser
+- and if we try to parse an unknown mapping, we get a compile-time error
+
+---
+# Compile-time approach
+
+And now we have the usage we want...
+```tut:invisible
+import SaferParser._
+```
+```tut:nofail
+SaferParser[Account]("Fred,1234.23")
+SaferParser[Address]("123 Bryant St,San Francisco,94517")
+
+trait Foo
+SaferParser[Foo]("123,456,Hello World!")
+```
+
+We just invented Type classes!
+
+???
+
+---
+
+# Type classes
+
+1. Allow us to associate operations with types **without** modifying the definitions of those types
+2. Scala implements type classes via **implicit** values and **implicit** arguments
+3. Other languages like Haskell or Rust have type classes as first-class language features
+
+
+---
+# Type classes
+
+The structure of a type class is this:
+
+1. `SafeParser` is our type class
+
+```scala
+trait SafeParser[A] {
+  def apply(s: String): Option[A]
+}
+```
+???
+
+- we say that safeparser is our type class, which we use a trait and then define some interface like "apply" to it
+
+---
+# Type classes
+
+The structure of a type class is this:
+
+- `SafeParser` is our type class
+
+```tut:silent
+trait SafeParser[A] {
+  def apply(s: String): Option[A]
+}
+```
+- `SafeParser[Arglebargle]` is an **instance** of `SafeParser` for `Arglebargle`.
+
+```tut:silent
+case class Arglebargle(poppycock: String, applesauce: Int)
+val argleParser: SafeParser[Arglebargle] = new SafeParser[Arglebargle] {
+  def apply(s: String): Option[Arglebargle] = ???
+}
+```
+
+---
+# Type classes
+
+The structure of a type class is this:
+
+- `SafeParser` is our type class
+
+```tut:silent
+trait SafeParser[A] {
+  def apply(s: String): Option[A]
+}
+```
+- `SafeParser[Arglebargle]` is an **instance** of `SafeParser` for `Arglebargle`.
+
+```tut:silent
+case class Arglebargle(poppycock: String, applesauce: Int)
+val argleParser: SafeParser[Arglebargle] = new SafeParser[Arglebargle] {
+  def apply(s: String): Option[Arglebargle] = ???
+}
+```
+
+- The `accountParser` and `addressParser` are `vals`, but don't have to be (objects, generic methods)
+
+```tut:silent
+object AccountParser extends SafeParser[Account] {
+  def apply(s: String): Option[Account] = ???
+}
+```
+
+---
+# Type classes
+
+The structure of a type class is this:
+
+- `SafeParser` is our type class
+
+```tut:silent
+trait SafeParser[A] {
+  def apply(s: String): Option[A]
+}
+```
+- `SafeParser[Arglebargle]` is an **instance** of `SafeParser` for `Arglebargle`.
+
+```tut:silent
+case class Arglebargle(poppycock: String, applesauce: Int)
+implicit val argleParser: SafeParser[Arglebargle] = new SafeParser[Arglebargle] {
+  def apply(s: String): Option[Arglebargle] = ???
+}
+```
+
+- The `accountParser` and `addressParser` are `vals`, but don't have to be (objects, generic methods)
+
+```tut:silent
+implicit object AccountParser extends SafeParser[Account] {
+  def apply(s: String): Option[Account] = ???
+}
+```
+
+???
+
+- these instances are marked with "implicit" so that the compiler can create that mapping from A => SafeParser
+
+---
+# Type classes
+
+Let's say we wanted to introduce a new parser for some new type `Employee`:
+
+This will fail at compile-time:
+```tut:nofail
+case class Employee(name: String, title: String, startDate: Long)
+SaferParser[Employee]("Bob,Software Engineer,1486583553")
+```
+
+---
+# Type classes
+
+We only need to have an instance of a `SaferParser[Employee]`:
+
+```tut
+implicit object EmployeeParser extends SaferParser[Employee] {
+ def apply(s: String): Option[Employee] = s.split(",").toList match {
+   case List(name, title, startDate) =>
+     Try(startDate.toLong).map(Employee(name, title, _)).toOption
+   case _ => None
+ }
+}
+SaferParser[Employee]("Bob,Software Engineer,1486583553")
+```
+
+???
+
+- Notice that we didn't need to touch our SafeParser object
+- we only had to supply an instance of our type class for employee
+
+---
+# Type classes
+
+Instances are scoped (in complex ways)
+
+```scala
+object TestParser {
+  implicit val noopParser: SaferParser[Address] = new SaferParser[Address] {
+    def apply(s: String): Option[Address] = None
+  }
+  def parse[A](s: String)(implicit parser: SaferParser[A]): Option[A] = parser(s)
+}
+TestParser.parse[Account]("Fred,1234.56")
+ // Some(Account(Fred,1234.56))
+SaferParser[Address]("123 Bryant,San Francisco,94121")
+ // Some(Address(123 Bryant,San Francisco,94121))
+TestParser.parse[Address]("123 Bryant,San Francisco,94121")
+ // None
+```
+
+???
+
+1. --- unlike haskell where an instance of a type class is global, we can actually override instances in scala
+this allows a greater degree of flexibility for library writers and users to provide default implementions without fear
+of making their libraries unusable
+2. --- the scoping can be rather complex, but it's fairly straight-forward that scala will use the "closest" scoped implicit
+
+---
+# Type classes
+
+We can also (type)safely do the following:
+
+```tut:silent:fail
+"Fred,1234.56".as[Account]
+"123 Bryant,San Francisco,94121".as[Address]
+```
+
+???
+
+- once you have type-safe methods you can safely add inline functions to types
+
+---
+# Type classes
+
+Add syntactic sugar for your api:
+
+```tut:silent
+class ParserOps(val self: String) extends AnyVal {
+  def as[A](implicit parser: SaferParser[A]): Option[A] = parser(self)
+}
+trait ParserSyntax {
+  implicit def parserOps(s: String): ParserOps =
+    new ParserOps(s)
+}
+object Syntax extends ParserSyntax
+```
+
+???
+
+- one really nice thing to do is provide optional inline syntactic sugar to your api
+- this is some added boilerplate
+
+---
+# Type classes
+
+Now we can **explictly** enable this sugar:
+
+```tut
+import Syntax._
+
+"Fred,1234.56".as[Account]
+"123 Bryant,San Francisco,94121".as[Address]
+```
+
+---
+# Type classes
+
+`simulacrum` brings first-class support for type classes into Scala
+
+```tut:reset:silent
+import simulacrum._
+import scala.util.Try
+
+@typeclass trait Parser[A] {
+  def parse(s: String): Option[A]
+}
+
+implicit val intParser: Parser[Int] = new Parser[Int] {
+  def parse(s: String): Option[Int] = Try(s.toInt).toOption
+}
+```
+
+```tut:nofail
+Parser[Int].parse("1234")
+Parser[String].parse("string")
+```
+
+???
+
+- Type classes rock. Alas, their encoding in Scala requires a lot of boilerplate, which doesn't rock. There is inconsistency between projects, where type classes are encoded differently. There is inconsistency within projects, where object-oriented forwarders (aka. ops, syntax) accidentally differ in exact parameter lists or forwarders are missing where they are expected to be. Even in disciplined teams, the bike-shedding opportunities alone are a source of lost productivity.
+
+---
+# Type classes
+
+Lawfulness:
+1. We can define sets of laws that all instances must follow (like identity, associative, inverse, etc)
+2. `discipline` along with `scalacheck` can test all our instances of type classes
+3. These laws are shareable and composable with other laws
+
+???
+
+- This can give us a lot of confidence in our type classes and for the users of our type classes
+
+---
+# Type classes
+
+It makes sense to use this pattern in a lot of places (you'll see it everywhere in FP). A non-extensive list is:
+
+1. Operator overloading (method overloading)
+2. Generic interfaces, e.g. `trait SomeInterface[A]`, `Numeric[A]`
+3. Generating data, e.g. Scalacheck
+4. Serialization
+5. As building blocks to other type-safe things, e.g. macros, shapeless
+
+---
+
+# Type classes
+
+We now have satisfied two of our constraints...
+
+1. ~~The API should never throw **non-fatal** exceptions~~
+2. ~~Our solution should keep track at **compile-time** which types we can parse~~
+3. There should be little boilerplate
+
+???
+
+1. -- our parsers never throw non-fatal exceptions, because we return a value representing failure in option
+2. -- we let the compiler do the mapping of types to parsers via type classes
+3. -- we still have boilerplate, however, since we have to create instances for every type
+
+---
+# Reducing Boilerplate
+
+Let's take a look back at our data types
+
+```tut:silent
+case class Person(name: String, age: Int)
+case class Address(street: String, city: String, zip: Int)
+case class Account(owner: String, balance: Double)
+``` 
+
+???
+
+- What can we notice about these classes?
+
+---
+# Reducing Boilerplate
+
+Let's take a look back at our data types
+
+```tut:silent
+case class Person(name: String, age: Int)
+// (String, Int)
+case class Address(street: String, city: String, zip: Int)
+// (String, String, Int)
+case class Account(owner: String, balance: Double)
+// (String, Double)
+``` 
+
+???
+
+- They all seem to be built from types like String, Int, Double
+- What if we could somehow compose smaller parsers into parsers for more complicated case classes?
+
+---
+# Reducing Boilerplate
+
+Here is what we'd like to be able to do:
+
+```tut:silent:nofail
+Parser[Person]("Fred,44")
+case class Telephone(country: Int, area: Int, rest: Int)
+Parser[Telephone]("1,415,5555555")
+```
+
+???
+
+- we like to be able to make the compiler build parsers for arbitrary case classes if we already have parsers for the types those case classes use
+
+---
+# Reducing Boilerplate
+
+And we want to be able to do this, too:
+
+```tut:silent:nofail
+case class Contact(person: Person, telephone: Telephone, address: Address)
+Parser[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
+```
+
+---
+# Reducing Boilerplate
+
+And we want to be able to do this, too:
+
+```tut:silent:nofail
+case class Contact(person: Person, telephone: Telephone, address: Address)
+Parser[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
+```
+
+With:
+1. No exceptions
+2. No boilerplate
+3. No runtime reflection
+
+---
+
+class: center, middle
+
+<h1>You'll have to wait until next time</h1>
+
+Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
+
+8 Feb 2017 • Iterate!
+
+---
+
+
+ </textarea>
+    <script src="remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
