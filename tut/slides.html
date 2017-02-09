@@ -409,10 +409,80 @@ SaferParser[A]("some,thing")(A => Parser[A])
 - Scala's implicit values provide one way of implementing such a mapping
 
 ---
-
 # Compile-time approach
 
-With a few small changes to the companion object and parsers...
+Remember our `SaferParser`?
+
+```tut:silent
+import scala.util.Try
+
+trait SaferParser[A] {
+  def apply(s: String): Option[A]
+}
+
+val accountParser: SaferParser[Account] = new SaferParser[Account] {
+  def apply(s: String): Option[Account] = s.split(",").toList match {
+    case List(owner, balance) =>
+      Try(balance.toDouble).map(Account(owner, _)).toOption
+    case _ => None
+  }
+}
+
+val addressParser: SaferParser[Address] = new SaferParser[Address] {
+  def apply(s: String): Option[Address] = s.split(",").toList match {
+    case List(street, city, zip) =>
+      Try(zip.toInt).map(Address(street, city, _)).toOption
+    case _ => None
+  }
+}
+```
+
+???
+
+- let's make a couple of small changes to that safeparser
+
+---
+# Compile-time approach
+
+We'll move the parsers into that companion object we created...
+
+```tut:silent
+import scala.util.Try
+
+trait SaferParser[A] {
+  def apply(s: String): Option[A]
+}
+
+object SaferParser {
+  def apply[A](s: String)(parser: SaferParser[A]): Option[A] = parser(s)
+
+  val accountParser: SaferParser[Account] = new SaferParser[Account] {
+    def apply(s: String): Option[Account] = s.split(",").toList match {
+      case List(owner, balance) =>
+        Try(balance.toDouble).map(Account(owner, _)).toOption
+      case _ => None
+    }
+  }
+  
+  val addressParser: SaferParser[Address] = new SaferParser[Address] {
+    def apply(s: String): Option[Address] = s.split(",").toList match {
+      case List(street, city, zip) =>
+        Try(zip.toInt).map(Address(street, city, _)).toOption
+      case _ => None
+    }
+  }
+}
+
+```
+
+???
+
+- We'll move the address parser and account parser into the companion object that we created
+
+---
+# Compile-time approach
+
+And sprinkle a few implicits...
 
 ```tut:silent
 import scala.util.Try
@@ -445,9 +515,7 @@ object SaferParser {
 
 ???
 
-- We have simply moved the account and address parsers into the companion object and sprinkled in
-some implicit keywords
-- Now we have the usage that we want
+- And we'll sprinkle an implicit in front of the parsers, and one more implicit in the apply method
 
 ---
 # Compile-time approach
@@ -485,7 +553,7 @@ trait Foo
 SaferParser[Foo]("123,456,Hello World!")
 ```
 
-We just invented Type classes!
+We just discovered Type classes!
 
 ???
 
