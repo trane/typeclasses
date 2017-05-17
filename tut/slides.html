@@ -44,8 +44,8 @@ Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
 
 # Special Thanks
 
-- Travis Brown @travisbrown
-- Rob Norris @tpolecat
+- Travis Brown @travisbrown https://meta.plasm.us
+- Rob Norris @tpolecat https://tpolecat.github.io
 
 ???
 
@@ -915,9 +915,15 @@ deserialize(serialize(o)) <-> o
 
 # When Type classes are really the only option
 
-- Returning the "current" type in Scala
-- Getting around F-bounded types
+- Returning the "current" type in Scala `this.copy(???)`
+- Getting around F-bounded types `trait Foo[A <: Foo[A]]`
+    https://tpolecat.github.io/2015/04/29/f-bounds.html
 - Attaching behavior to any type outside of declaration
+
+???
+
+- This question comes up a lot because Scala encourages immutability, so methods that return a modified copy of this are quite common. Making the return type of such methods sufficiently precise is tricky
+- An F-bounded type is parameterized over its own subtypes, which allows us to “pass” the implementing type as an argument to the superclass.
 
 ---
 
@@ -1161,9 +1167,31 @@ Applesauce("motts").update("grandma's")
 
 ---
 
+# And this is equivalent to...
+
+```tut:nofail:book
+trait Foo {
+  def name: String
+  def update(newName: String): Foo
+}
+case class Arglebargle(name: String) extends Foo {
+  def update(newName: String) = this.copy(name = newName)
+}
+
+case class Applesauce(brand: String) extends Foo {
+  val name = brand
+  def update(newBrand: String) = this.copy(brand = newBrand)
+}
+
+Arglebargle("poppycock").update("grumble")
+Applesauce("motts").update("grandma's")
+```
+
+---
+
 # Only not really..
 
-1. Inheritance is not a guarantee that you return the correct type
+1. Inheritance/Mixin is not a guarantee that you return the correct type
 2. And you can do this with type-classes...
 
 
@@ -1187,12 +1215,30 @@ hi.update("world")
 1. Anywhere you want to abstract over type-constructors
 2. Anywhere where you need to return the current type
 3. Anywhere to define behavior on any type:
-  a. even those you don't control
-  b. even those written by users of your code
+    * even those you don't control
+    * even those not yet written by future users of your code
+4. Completely replace inheritance
+
+---
+
+# Uses of type-classes
+
+1. Anywhere you want to abstract over type-constructors
+2. Anywhere where you need to return the current type
+3. Anywhere to define behavior on any type:
+    * even those you don't control
+    * even those not yet written by future users of your code
+4. ~~Completely replace inheritance~~
+
+???
+
+no you shouldn't do 4
 
 ---
 
 # Type-classes
+
+Remember our `SaferParser` implementation?
 
 We now have satisfied two of our constraints...
 
