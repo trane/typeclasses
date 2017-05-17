@@ -18,6 +18,6 @@ addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.fu
 
 libraryDependencies += "com.github.mpilquist" %% "simulacrum" % "0.10.0"
 
-tutSettings
+enablePlugins(TutPlugin)
 tutSourceDirectory := baseDirectory.value / "tut"
 tutTargetDirectory := baseDirectory.value / "tut-out"
