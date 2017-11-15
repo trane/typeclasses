@@ -20,8 +20,8 @@
     <textarea id="source">
 
 ```tut:invisible
-object Parser {
-  def parse[A](s: String): Option[A] = None
+object Deserialize {
+  def as[A](s: String): Option[A] = None
 }
 ```
 
@@ -31,7 +31,7 @@ class: center, middle
 
 Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
 
-16 May 2017 • SF Scala (un)Meetup
+16 November 2017 • Scalœ by the Bay
 
 ???
 
@@ -44,9 +44,13 @@ Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
 
 # Special Thanks
 
-- Travis Brown @travisbrown https://meta.plasm.us
 - Rob Norris @tpolecat https://tpolecat.github.io
-
+  - tut
+  - f-bounded types
+  - pedagogical mastery
+- Travis Brown @travisbrown https://meta.plasm.us
+  - "Type classes and generic derivation"
+  - prolific stackoverflow gems
 ???
 
 - Before I begin, I wanted to just thank Travis Brown (whos work in the scala community heavily influenced
@@ -61,7 +65,7 @@ my best to give this in that spirit.
 1. Gain an intuition about **type classes**
 2. Learn a bit about type safety and making the **compiler** do some work for you
 3. Gain some confidence in applying the type class pattern in your every day code
-4. Expose yourself to some other applications of type classes
+4. Exposure to some other applications of type classes
 
 ???
 
@@ -92,10 +96,10 @@ case class Account(owner: String, balance: Double)
 # API for serialization
 
 ```tut:silent
-val fred = Parser.parse[Person]("Fred,44")
-val wilma = Parser.parse[Person]("Wilma,44")
-val home = Parser.parse[Address]("1234 Bryant,San Francisco,94444")
-val checking = Parser.parse[Account]("Robert,2222.42") 
+val fred = Deserialize.as[Person]("Fred,44")
+val wilma = Deserialize.as[Person]("Wilma,44")
+val home = Deserialize.as[Address]("1234 Bryant,San Francisco,94444")
+val checking = Deserialize.as[Account]("Robert,2222.42") 
 ```
 
 ???
@@ -108,14 +112,14 @@ val checking = Parser.parse[Account]("Robert,2222.42")
 # Constraints
 
 1. The API should never throw **non-fatal** exceptions
-2. Our solution should keep track at **compile-time** which types we can parse
+2. Our solution should keep track at **compile-time** which types we can deserialize
 3. There should be little boilerplate
 
 ???
 
 1. --- so an exception like OutOfMemoryError is perfectly fine to throw, but if we see a NumberFormatException we need to handle it ourselves
 so, we'll need to handle the possibility that our input strings might not be valid representations
-2. --- we should never get a runtime failure (either in the form of an exception or a value representing a failure) because we tried to parse
+2. --- we should never get a runtime failure (either in the form of an exception or a value representing a failure) because we tried to as
 a string into a type that we don't know anything about
 3. --- boilerplate is an easy way to create technical debt and bugs
 
@@ -124,17 +128,17 @@ a string into a type that we don't know anything about
 # First go
 
 ```tut:silent
-trait RowParser[A] {
+trait RowDeserialize[A] {
   def apply(s: String): A
 }
 
-val accountParser: RowParser[Account] = new RowParser[Account] {
+val accountDeserialize: RowDeserialize[Account] = new RowDeserialize[Account] {
   def apply(s: String): Account = s.split(",").toList match {
     case List(owner, balance) => Account(owner, balance.toDouble)
   }
 }
 
-val addressParser: RowParser[Address] = new RowParser[Address] {
+val addressDeserialize: RowDeserialize[Address] = new RowDeserialize[Address] {
   def apply(s: String): Address = s.split(",").toList match {
     case List(street, city, zip) => Address(street, city, zip.toInt)
   }
@@ -148,14 +152,14 @@ val addressParser: RowParser[Address] = new RowParser[Address] {
 Now we can write the following...
 
 ```tut
-accountParser("Chris Yang,2.32")
-addressParser("548 4th St,San Francisco,94107")
+accountDeserialize("Chris Yang,2.32")
+addressDeserialize("548 4th St,San Francisco,94107")
 ```
 
 ???
 
 - This is actually a pretty nice API because of scala's syntactic sugar on apply
-- further, because we are using a generic type parameter on our parser, we have a useful type (not just Any)
+- further, because we are using a generic type parameter on our deserializer, we have a useful type (not just Any)
 - but, there are 3 problems
 
 ---
@@ -169,8 +173,8 @@ addressParser("548 4th St,San Francisco,94107")
 # Problems
 
 ```tut:fail
-accountParser("Chris Yang,")
-accountParser("Chris Yang,Not a double")
+accountDeserialize("Chris Yang,")
+accountDeserialize("Chris Yang,Not a double")
 ```
 
 ---
@@ -178,19 +182,19 @@ accountParser("Chris Yang,Not a double")
 # Problems
 
 1. Allow non-fatal errors to be thrown
-2. Have to keep track of a `RowParser` instance for each type we want to parse
+2. Have to keep track of a `RowDeserialize` instance for each type we want to deserialize
 
 ---
 
 # Problems
 
 1. Allow non-fatal errors to be thrown
-2. Have to keep track of a `RowParser` instance for each type we want to parse
+2. Have to keep track of a `RowDeserialize` instance for each type we want to deserialize
 3. We have to write a lot of boilerplate
 
 ???
 
-3. --- this is closely related to 2, we have to define instnaces for every one of our case classes and
+3. --- this is closely related to 2, we have to define instances for every one of our case classes and
 those definitions are very repetitive
 
 ---
@@ -200,17 +204,17 @@ those definitions are very repetitive
 The first problem is easy to fix...
 
 ```tut:silent
-trait RowParser[A] {
+trait RowDeserialize[A] {
   def apply(s: String): A
 }
 
-val accountParser: RowParser[Account] = new RowParser[Account] {
+val accountDeserialize: RowDeserialize[Account] = new RowDeserialize[Account] {
   def apply(s: String): Account = s.split(",").toList match {
     case List(owner, balance) => Account(owner, balance.toDouble)
   }
 }
 
-val addressParser: RowParser[Address] = new RowParser[Address] {
+val addressDeserialize: RowDeserialize[Address] = new RowDeserialize[Address] {
   def apply(s: String): Address = s.split(",").toList match {
     case List(street, city, zip) => Address(street, city, zip.toInt)
   }
@@ -225,11 +229,11 @@ Return an `Option` of the value:
 ```tut:silent
 import scala.util.Try
 
-trait SaferParser[A] {
+trait SaferDeserialize[A] {
   def apply(s: String): Option[A]
 }
 
-val accountParser: SaferParser[Account] = new SaferParser[Account] {
+val accountDeserialize: SaferDeserialize[Account] = new SaferDeserialize[Account] {
   def apply(s: String): Option[Account] = s.split(",").toList match {
     case List(owner, balance) =>
       Try(balance.toDouble).map(Account(owner, _)).toOption
@@ -237,7 +241,7 @@ val accountParser: SaferParser[Account] = new SaferParser[Account] {
   }
 }
 
-val addressParser: SaferParser[Address] = new SaferParser[Address] {
+val addressDeserialize: SaferDeserialize[Address] = new SaferDeserialize[Address] {
   def apply(s: String): Option[Address] = s.split(",").toList match {
     case List(street, city, zip) =>
       Try(zip.toInt).map(Address(street, city, _)).toOption
@@ -248,7 +252,7 @@ val addressParser: SaferParser[Address] = new SaferParser[Address] {
 
 ???
 
-- we simply represent the possiblity of failure with the option type
+- we simply represent the possibility of failure with the option type
 - this allows us to return failures as values
 
 ---
@@ -258,16 +262,16 @@ val addressParser: SaferParser[Address] = new SaferParser[Address] {
 Now our api expresses the possibility that the input is invalid:
 
 ```tut
-accountParser("Chris Yang,2.32")
-addressParser("548 4th St,San Francisco,94107")
-accountParser("Chris Yang,")
-accountParser("Chris Yang,Not a double")
+accountDeserialize("Chris Yang,2.32")
+addressDeserialize("548 4th St,San Francisco,94107")
+accountDeserialize("Chris Yang,")
+accountDeserialize("Chris Yang,Not a double")
 ```
 
 ???
 
-- And now it's impossible to make our parser crash with a recoverable exception -- if the input is invalid we return a None
-- unfortunately, we still have to track a parser for each type
+- And now it's impossible to make our deserialize crash with a recoverable exception -- if the input is invalid we return a None
+- unfortunately, we still have to track a deserializer for each type
 
 ---
 # Runtime reflection
@@ -276,32 +280,28 @@ If we were writing Java or Java-flavored Scala:
 
 ```tut:silent
 import scala.reflect.ClassTag
-import scala.util.Try
 
-object ReflectionParser {
-  def apply[T: ClassTag](s: String): Option[T] = Try {
-    val ctor = implicitly[ClassTag[T]].runtimeClass.getConstructors.head
-    val paramsArray = s.split(",").map(_.trim)
-    val paramsWithTypes = paramsArray.zip(ctor.getParameterTypes)
-
-    val parameters = paramsWithTypes.map {
+object ReflectionDeserialize {
+  def apply[A](s: String)(implicit ctag: ClassTag[A]): Option[A] = Try {
+    val ctor = ctag.runtimeClass.getConstructors.head
+    val parameters = s.split(",").map(_.trim).zip(ctor.getParameterTypes).map {
       case (param, cls) => cls.getName match {
         case "int" => param.toInt.asInstanceOf[Object]
         case "double" => param.toDouble.asInstanceOf[Object]
         case _ =>
-          val paramConstructor = cls.getConstructor(param.getClass)
-          paramConstructor.newInstance(param).asInstanceOf[Object]
+          val paramCtor = cls.getConstructor(param.getClass)
+          paramCtor.newInstance(param).asInstanceOf[Object]
       }
     }
 
-    ctor.newInstance(parameters: _*).asInstanceOf[T]
+    ctor.newInstance(parameters: _*).asInstanceOf[A]
   }.toOption
-} // author: @travisbrown
+} // adapted from author @travisbrown
 ```
 
 ???
 
-- To handle the problem of tracking an instance of `RowParser` for every type, we might use reflection
+- To handle the problem of tracking an instance of `RowDeserialize` for every type, we might use reflection
 To solve the syntax and boilerplate issues, and this is exactly what libraries like salat and lift-json do
 
 ---
@@ -310,35 +310,44 @@ To solve the syntax and boilerplate issues, and this is exactly what libraries l
 This works pretty nicely!
 
 ```tut
-ReflectionParser[Address]("548 4th St,San Francisco,94107")
-ReflectionParser[Person]("Fred,44")
-ReflectionParser[Account]("Fred,22422.49")
-ReflectionParser[Account]("Chris Yang,")
-ReflectionParser[Person]("3cpo,NaN")
+ReflectionDeserialize[Address]("548 4th St,San Francisco,94107")
+ReflectionDeserialize[Person]("Fred,44")
+ReflectionDeserialize[Account]("Fred,22422.49")
+ReflectionDeserialize[Account]("Chris Yang,")
+ReflectionDeserialize[Person]("3cpo,NaN")
 ```
 
 ???
 
 - There is no boilerplate and it won't throw recoverable exception.
-- The only problem is that this approach knows nothing at compile time about what types it can or can't parse
+- The only problem is that this approach knows nothing at compile time about what types it can or can't deserialize
 
 ---
 # Runtime reflection
 
 Annoying...
 ```tut
-ReflectionParser[List[Person]]("Fred,44")
-ReflectionParser[Int]("548 4th St,San Francisco,94107")
+ReflectionDeserialize[List[Person]]("Fred,44")
+ReflectionDeserialize[Int]("548 4th St,San Francisco,94107")
 
 trait Foo; case class Bar(a: String, b: String, i: Int) extends Foo
-ReflectionParser[Foo]("Domino,Data,1")
+ReflectionDeserialize[Foo]("Domino,Data,1")
 ```
 
 ???
 
 - All of these operations fail at runtime
 - We could make this less annoying by using Try to represent failure and provide error values that would tell us
-why the operation failed (like bad input or we don't know how to parse the type), but that's still annoying
+why the operation failed (like bad input or we don't know how to as the type), but that's still annoying
+
+---
+
+# Engineering Wiki Article @ Domino Data Lab
+
+## <center>Surviving Salat</center>
+
+???
+
 - Since we work with libraries like this, we probably all have a sense of just how annoying this is (like salat)
 
 ---
@@ -349,21 +358,21 @@ What we are aiming for...
 
 Should compile
 ```scala
-SaferParser[Account]("Fred,2223.43")
+SaferDeserialize[Account]("Fred,2223.43")
 ```
 
 Shouldn't compile
 ```scala
 trait Foo
-SaferParser[Foo]("Fred,44")
+SaferDeserialize[Foo]("Fred,44")
 ```
 
 ???
 
-- Let's go back to our saferparser, which didn't let us try to parse into types we don't know about and
-made us keep track of our parser for each type individually
+- Let's go back to our saferdeserializer, which didn't let us try to as into types we don't know about and
+made us keep track of our deserializer for each type individually
 - We want to adapt it so that it doesn't make us do this tracking ourselves
-- while also not letting us try to parse any arbitrary type
+- while also not letting us try to as any arbitrary type
 
 ---
 # Compile-time approach
@@ -371,74 +380,74 @@ made us keep track of our parser for each type individually
 Let's give the type a companion object with an apply method:
 
 ```tut:silent
-object SaferParser {
-  def apply[A](s: String)(parser: SaferParser[A]): Option[A] = parser(s)
+object SaferDeserialize {
+  def apply[A](s: String)(izer: SaferDeserialize[A]): Option[A] = izer(s)
 }
 ```
 Which let's us write:
 
 ```tut
-SaferParser[Account]("Fred,1234.56")(accountParser)
-SaferParser[Address]("123 Front St,San Francisco,94111")(addressParser)
+SaferDeserialize[Account]("Fred,1234.56")(accountDeserialize)
+SaferDeserialize[Address]("123 Front St,San Francisco,94111")(addressDeserialize)
 ```
 
 But not...
 
 ```tut:silent:nofail
 trait Foo
-SaferParser[Foo]("123,456,Hello World")(???)
+SaferDeserialize[Foo]("123,456,Hello World")(???)
 ```
 
 ???
 
 - This is more verbose than our original usage, but it looks more like our target usage
-- but, on the bright side we simply can't parse a type we don't have a parser for!
+- but, on the bright side we simply can't as a type we don't have a deserializer for!
 
 ---
 # Compile-time approach
 
-1. It's possible to define multiple parsers for a single type
+1. It's possible to define multiple deserializers for a single type
 ```tut:silent:fail
-SaferParser[Account]("Fred,1234.56")(accountParser2)
-SaferParser[Account]("Fred,1234.56")(accountParser3)
+SaferDeserialize[Account]("Fred,1234.56")(accountDeserialize2)
+SaferDeserialize[Account]("Fred,1234.56")(accountDeserialize3)
 ```
 
 ???
 
-- Let's thing about our SaferParser values. It's possible to define multiple parser for a single type
+- Let's thing about our SaferDeserialize values. It's possible to define multiple deserializers for a single type
 
 ---
 # Compile-time approach
 
-1. It's possible to define multiple parsers for a single type
+1. It's possible to define multiple deserializers for a single type
 ```tut:silent:fail
-SaferParser[Account]("Fred,1234.56")(accountParser2)
-SaferParser[Account]("Fred,1234.56")(accountParser3)
+SaferDeserialize[Account]("Fred,1234.56")(accountDeserialize2)
+SaferDeserialize[Account]("Fred,1234.56")(accountDeserialize3)
 ```
-2. Our parser is meant for a single format
+2. Our deserializer is meant for a single format
 ```tut:silent:fail
-SaferParser[Account]("Fred,1234.56")(theOneAccountParser)
+SaferDeserialize[Account]("Fred,1234.56")(theOneAccountDeserialize)
 ```
 
 ???
-- but since it's meant to parse a single format that doesn't make much sense -- in fact we could imagine a kind
-of mapping from types to parser.
+- but since it's meant to as a single format that doesn't make much sense -- in fact we could imagine a kind
+of mapping from types to deserializers.
 
 ---
 # Compile-time approach
 
-1. It's possible to define multiple parsers for a single type
+1. It's possible to define multiple deserializers for a single type
 ```tut:silent:fail
-SaferParser[Account]("Fred,1234.56")(accountParser2)
-SaferParser[Account]("Fred,1234.56")(accountParser3)
+SaferDeserialize[Account]("Fred,1234.56")(accountDeserialize2)
+SaferDeserialize[Account]("Fred,1234.56")(accountDeserialize3)
 ```
-2. Our parser is meant for a single format
+2. Our deserializer is meant for a single format
 ```tut:silent:fail
-SaferParser[Account]("Fred,1234.56")(theOneAccountParser)
+SaferDeserialize[Account]("Fred,1234.56")(theOneAccountDeserialize)
 ```
-3. Since we have a one-to-one mapping, we can imagine some kind of mapping from `A => Parser[A]`
+3. Since we have a one-to-one mapping, we can imagine some kind of mapping from `A => Deserialize[A]`
 ```scala
-SaferParser[A]("some,thing")(A => Parser[A])
+SaferDeserialize[A]("some,thing")(A => Deserialize[A])
 ```
 
 ???
@@ -448,24 +457,43 @@ SaferParser[A]("some,thing")(A => Parser[A])
 ---
 # Compile-time approach
 
-Remember our `SaferParser`?
+Imagine if we could write a mapping function from `A => Deserialize[A]`...
+
+```scala
+def mapping[A](a: A): Deserialize[A] =
+  if (a.isInstanceOf[Account]) accountDeserializer
+  else if (a.isInstanceOf[Person]) personDeserializer
+  else if (a.isInstanceOf[Address]) addressDeserializer
+  else throw new RuntimeException("No deserializer found")
+```
+
+Or if we had some ability to make a dynamic lookup `Map[_, Deserialize[_]]`...
+
+```scala
+def mapping[A](mapper: Map[_, Deserialize[_]]): Deserialize[A] =
+  mapper.find(_.isInstanceOf[A])
+        .map(_.asInstanceOf[Deserialize[A]])
+        .getOrElse(throw new RuntimeException("No deserializer found"))
+```
+
+---
+# Compile-time approach
+
+Remember our `SaferDeserialize`?
 
 ```tut:silent
-import scala.util.Try
-
-trait SaferParser[A] {
+trait SaferDeserialize[A] {
   def apply(s: String): Option[A]
 }
 
-val accountParser: SaferParser[Account] = new SaferParser[Account] {
+val account: SaferDeserialize[Account] = new SaferDeserialize[Account] {
   def apply(s: String): Option[Account] = s.split(",").toList match {
     case List(owner, balance) =>
       Try(balance.toDouble).map(Account(owner, _)).toOption
     case _ => None
   }
 }
-
-val addressParser: SaferParser[Address] = new SaferParser[Address] {
+val address: SaferDeserialize[Address] = new SaferDeserialize[Address] {
   def apply(s: String): Option[Address] = s.split(",").toList match {
     case List(street, city, zip) =>
       Try(zip.toInt).map(Address(street, city, _)).toOption
@@ -476,32 +504,30 @@ val addressParser: SaferParser[Address] = new SaferParser[Address] {
 
 ???
 
-- let's make a couple of small changes to that safeparser
+- let's make a couple of small changes to that safedeserializer
 
 ---
 # Compile-time approach
 
-We'll move the parsers into that companion object we created...
+We'll move the deserializers into that companion object we created...
 
 ```tut:silent
-import scala.util.Try
-
-trait SaferParser[A] {
+trait SaferDeserialize[A] {
   def apply(s: String): Option[A]
 }
 
-object SaferParser {
-  def apply[A](s: String)(parser: SaferParser[A]): Option[A] = parser(s)
+object SaferDeserialize {
+  def apply[A](s: String)(deserialize: SaferDeserialize[A]): Option[A] =
+    deserialize(s)
 
-  val accountParser: SaferParser[Account] = new SaferParser[Account] {
+  val account: SaferDeserialize[Account] = new SaferDeserialize[Account] {
     def apply(s: String): Option[Account] = s.split(",").toList match {
       case List(owner, balance) =>
         Try(balance.toDouble).map(Account(owner, _)).toOption
       case _ => None
     }
   }
-  
-  val addressParser: SaferParser[Address] = new SaferParser[Address] {
+  val address: SaferDeserialize[Address] = new SaferDeserialize[Address] {
     def apply(s: String): Option[Address] = s.split(",").toList match {
       case List(street, city, zip) =>
         Try(zip.toInt).map(Address(street, city, _)).toOption
@@ -509,12 +535,11 @@ object SaferParser {
     }
   }
 }
-
 ```
 
 ???
 
-- We'll move the address parser and account parser into the companion object that we created
+- We'll move the address deserializer and account deserializer into the companion object that we created
 
 ---
 # Compile-time approach
@@ -522,24 +547,23 @@ object SaferParser {
 And sprinkle a few implicits...
 
 ```tut:silent
-import scala.util.Try
-
-trait SaferParser[A] {
+trait SaferDeserialize[A] {
   def apply(s: String): Option[A]
 }
 
-object SaferParser {
-  def apply[A](s: String)(implicit parser: SaferParser[A]): Option[A] = parser(s)
+object SaferDeserialize {
+  def apply[A](s: String)(implicit deserializer: SaferDeserialize[A]): Option[A] =
+    deserializer(s)
 
-  implicit val accountParser: SaferParser[Account] = new SaferParser[Account] {
+  implicit val account: SaferDeserialize[Account] = new SaferDeserialize[Account] {
     def apply(s: String): Option[Account] = s.split(",").toList match {
       case List(owner, balance) =>
         Try(balance.toDouble).map(Account(owner, _)).toOption
       case _ => None
     }
   }
-  
-  implicit val addressParser: SaferParser[Address] = new SaferParser[Address] {
+
+  implicit val address: SaferDeserialize[Address] = new SaferDeserialize[Address] {
     def apply(s: String): Option[Address] = s.split(",").toList match {
       case List(street, city, zip) =>
         Try(zip.toInt).map(Address(street, city, _)).toOption
@@ -547,47 +571,46 @@ object SaferParser {
     }
   }
 }
-
 ```
 
 ???
 
-- And we'll sprinkle an implicit in front of the parsers, and one more implicit in the apply method
+- And we'll sprinkle an implicit in front of the deserializer, and one more implicit in the apply method
 
 ---
 # Compile-time approach
 
 And now we have the usage we want...
 ```tut:invisible
-import SaferParser._
+import SaferDeserialize._
 ```
 ```tut:nofail
-SaferParser[Account]("Fred,1234.23")
-SaferParser[Address]("123 Bryant St,San Francisco,94517")
+SaferDeserialize[Account]("Fred,1234.23")
+SaferDeserialize[Address]("123 Bryant St,San Francisco,94517")
 
 trait Foo
-SaferParser[Foo]("123,456,Hello World!")
+SaferDeserialize[Foo]("123,456,Hello World!")
 ```
 
 ???
 
-- notice that we don't have to specify the parse instance, only the type we want to parse
-scala's implicits create the mapping from the type to the instance of the parser
-- and if we try to parse an unknown mapping, we get a compile-time error
+- notice that we don't have to specify the deserializer instance, only the type we want to deserialize
+scala's implicits create the mapping from the type to the instance of the deserializer 
+- and if we try to as an unknown mapping, we get a compile-time error
 
 ---
 # Compile-time approach
 
 And now we have the usage we want...
 ```tut:invisible
-import SaferParser._
+import SaferDeserialize._
 ```
 ```tut:nofail
-SaferParser[Account]("Fred,1234.23")
-SaferParser[Address]("123 Bryant St,San Francisco,94517")
+SaferDeserialize[Account]("Fred,1234.23")
+SaferDeserialize[Address]("123 Bryant St,San Francisco,94517")
 
 trait Foo
-SaferParser[Foo]("123,456,Hello World!")
+SaferDeserialize[Foo]("123,456,Hello World!")
 ```
 
 We just discovered Type classes!
@@ -612,36 +635,37 @@ We just discovered Type classes!
 
 The structure of a type class is this:
 
-1. `SafeParser` is our type class
+1. `SafeDeserialize` is our type class
 
 ```scala
-trait SafeParser[A] {
+trait SafeDeserialize[A] {
   def apply(s: String): Option[A]
 }
 ```
 ???
 
-- we say that safeparser is our type class, which we use a trait and then define some interface like "apply" to it
+- we say that safedeserialize is our type class, which we use a trait and then define some interface like "apply" to it
 
 ---
 # Type classes
 
 The structure of a type class is this:
 
-- `SafeParser` is our type class
+- `SafeDeserialize` is our type class
 
 ```tut:silent
-trait SafeParser[A] {
+trait SafeDeserialize[A] {
   def apply(s: String): Option[A]
 }
 ```
-- `SafeParser[Arglebargle]` is an **instance** of `SafeParser` for `Arglebargle`.
+- `SafeDeserialize[Arglebargle]` is an **instance** of `SafeDeserialize` for `Arglebargle`.
 
 ```tut:silent
 case class Arglebargle(poppycock: String, applesauce: Int)
-val argleParser: SafeParser[Arglebargle] = new SafeParser[Arglebargle] {
-  def apply(s: String): Option[Arglebargle] = ???
-}
+val argleDeserialize: SafeDeserialize[Arglebargle] =
+  new SafeDeserialize[Arglebargle] {
+    def apply(s: String): Option[Arglebargle] = ???
+  }
 ```
 
 ---
@@ -649,26 +673,27 @@ val argleParser: SafeParser[Arglebargle] = new SafeParser[Arglebargle] {
 
 The structure of a type class is this:
 
-- `SafeParser` is our type class
+- `SafeDeserialize` is our type class
 
 ```tut:silent
-trait SafeParser[A] {
+trait SafeDeserialize[A] {
   def apply(s: String): Option[A]
 }
 ```
-- `SafeParser[Arglebargle]` is an **instance** of `SafeParser` for `Arglebargle`.
+- `SafeDeserialize[Arglebargle]` is an **instance** of `SafeDeserialize` for `Arglebargle`.
 
 ```tut:silent
 case class Arglebargle(poppycock: String, applesauce: Int)
-val argleParser: SafeParser[Arglebargle] = new SafeParser[Arglebargle] {
-  def apply(s: String): Option[Arglebargle] = ???
-}
+val argleDeserialize: SafeDeserialize[Arglebargle] =
+  new SafeDeserialize[Arglebargle] {
+    def apply(s: String): Option[Arglebargle] = ???
+  }
 ```
 
-- The `accountParser` and `addressParser` are `vals`, but don't have to be (objects, generic methods)
+- The `accountDeserialize` and `addressDeserialize` are `vals`, but don't have to be (objects, generic methods)
 
 ```tut:silent
-object AccountParser extends SafeParser[Account] {
+object AccountDeserialize extends SafeDeserialize[Account] {
   def apply(s: String): Option[Account] = ???
 }
 ```
@@ -678,64 +703,65 @@ object AccountParser extends SafeParser[Account] {
 
 The structure of a type class is this:
 
-- `SafeParser` is our type class
+- `SafeDeserialize` is our type class
 
 ```tut:silent
-trait SafeParser[A] {
+trait SafeDeserialize[A] {
   def apply(s: String): Option[A]
 }
 ```
-- `SafeParser[Arglebargle]` is an **instance** of `SafeParser` for `Arglebargle`.
+- `SafeDeserialize[Arglebargle]` is an **instance** of `SafeDeserialize` for `Arglebargle`.
 
 ```tut:silent
 case class Arglebargle(poppycock: String, applesauce: Int)
-implicit val argleParser: SafeParser[Arglebargle] = new SafeParser[Arglebargle] {
-  def apply(s: String): Option[Arglebargle] = ???
-}
+implicit val argleDeserialize: SafeDeserialize[Arglebargle] =
+  new SafeDeserialize[Arglebargle] {
+    def apply(s: String): Option[Arglebargle] = ???
+  }
 ```
 
-- The `accountParser` and `addressParser` are `vals`, but don't have to be (objects, generic methods)
+- The `accountDeserialize` and `addressDeserialize` are `vals`, but don't have to be (objects, generic methods)
 
 ```tut:silent
-implicit object AccountParser extends SafeParser[Account] {
+implicit object AccountDeserialize extends SafeDeserialize[Account] {
   def apply(s: String): Option[Account] = ???
 }
 ```
 
 ???
 
-- these instances are marked with "implicit" so that the compiler can create that mapping from A => SafeParser
+- these instances are marked with "implicit" so that the compiler can create that mapping from A => SafeDeserialize
 
 ---
 # Type classes
 
-Let's say we wanted to introduce a new parser for some new type `Employee`:
+Let's say we wanted to introduce a new deserializer for some new type `Employee`:
 
 This will fail at compile-time:
 ```tut:nofail
 case class Employee(name: String, title: String, startDate: Long)
-SaferParser[Employee]("Bob,Software Engineer,1486583553")
+SaferDeserialize[Employee]("Flora,Software Engineer,1486583553")
 ```
 
 ---
 # Type classes
 
-We only need to have an instance of a `SaferParser[Employee]`:
+We only need to have an instance of a `SaferDeserialize[Employee]`:
 
 ```tut
-implicit object EmployeeParser extends SaferParser[Employee] {
+implicit object EmployeeDeserialize extends SaferDeserialize[Employee] {
  def apply(s: String): Option[Employee] = s.split(",").toList match {
    case List(name, title, startDate) =>
      Try(startDate.toLong).map(Employee(name, title, _)).toOption
    case _ => None
  }
 }
-SaferParser[Employee]("Bob,Software Engineer,1486583553")
+SaferDeserialize[Employee]("Bob,Software Engineer,1486583553")
 ```
 
 ???
 
-- Notice that we didn't need to touch our SafeParser object
+- Notice that we didn't need to touch our SafeDeserialize object
 - we only had to supply an instance of our type class for employee
 
 ---
@@ -744,17 +770,19 @@ SaferParser[Employee]("Bob,Software Engineer,1486583553")
 Instances are scoped (in complex ways)
 
 ```scala
-object TestParser {
-  implicit val noopParser: SaferParser[Address] = new SaferParser[Address] {
-    def apply(s: String): Option[Address] = None
-  }
-  def parse[A](s: String)(implicit parser: SaferParser[A]): Option[A] = parser(s)
+object TestDeserialize {
+  implicit val noopDeserialize: SaferDeserialize[Address] =
+    new SaferDeserialize[Address] {
+      def apply(s: String): Option[Address] = None
+    }
+  def as[A](s: String)(implicit deserializer: SaferDeserialize[A]): Option[A] =
+    deserializer(s)
 }
-TestParser.parse[Account]("Fred,1234.56")
+TestDeserialize.as[Account]("Fred,1234.56")
  // Some(Account(Fred,1234.56))
-SaferParser[Address]("123 Bryant,San Francisco,94121")
+SaferDeserialize[Address]("123 Bryant,San Francisco,94121")
  // Some(Address(123 Bryant,San Francisco,94121))
-TestParser.parse[Address]("123 Bryant,San Francisco,94121")
+TestDeserialize.as[Address]("123 Bryant,San Francisco,94121")
  // None
 ```
 
@@ -785,14 +813,15 @@ We can also (type)safely do the following:
 Add syntactic sugar for your api:
 
 ```tut:silent
-class ParserOps(val self: String) extends AnyVal {
-  def as[A](implicit parser: SaferParser[A]): Option[A] = parser(self)
+class DeserializeOps(val self: String) extends AnyVal {
+  def as[A](implicit deserializer: SaferDeserialize[A]): Option[A] =
+    deserializer(self)
 }
-trait ParserSyntax {
-  implicit def parserOps(s: String): ParserOps =
-    new ParserOps(s)
+trait DeserializeSyntax {
+  implicit def deserializeOps(s: String): DeserializeOps =
+    new DeserializeOps(s)
 }
-object Syntax extends ParserSyntax
+object Syntax extends DeserializeSyntax
 ```
 
 ???
@@ -821,18 +850,18 @@ import Syntax._
 import simulacrum._
 import scala.util.Try
 
-@typeclass trait Parser[A] {
-  def parse(s: String): Option[A]
+@typeclass trait Deserialize[A] {
+  def as(s: String): Option[A]
 }
 
-implicit val intParser: Parser[Int] = new Parser[Int] {
-  def parse(s: String): Option[Int] = Try(s.toInt).toOption
+implicit val intDeserialize: Deserialize[Int] = new Deserialize[Int] {
+  def as(s: String): Option[Int] = Try(s.toInt).toOption
 }
 ```
 
 ```tut:nofail
-Parser[Int].parse("1234")
-Parser[String].parse("string")
+Deserialize[Int].as("1234")
+Deserialize[String].as("string")
 ```
 
 ???
@@ -863,6 +892,10 @@ It makes sense to use this pattern in a lot of places (you'll see it everywhere 
 4. Serialization
 5. As building blocks to other type-safe things, e.g. macros, shapeless
 6. Functional programming with cats/scalaz
+7. When you have a lot of boilerplate matching on types
+
+> In my experience I have never regretted replacing a superclass with a typeclass.
+> -- tpolecat
 
 ???
 
@@ -870,10 +903,77 @@ It makes sense to use this pattern in a lot of places (you'll see it everywhere 
 
 ---
 
+# Type classes: Operator Overloading
+
+Subclassing and wrapping classes.
+
+```tut:reset:silent
+abstract class BusinessOO {
+  def doBusiness: Unit
+}
+class BusinessString(str: String) extends BusinessOO {
+  def doBusiness: Unit  = println(s"Biz $str!")
+}
+class BusinessInt(int: Int) extends BusinessOO {
+  def doBusiness: Unit  = println(s"Biz ${int + 1}!")
+}
+
+def doBusiness(business: BusinessOO): Unit = business.doBusiness
+```
+
+```scala
+package srsbsns
+
+class SeriousBusinessString(str: String) extends BusinessString(str) {
+  override def doBusiness: Unit = println(s"Serious business $str")
+}
+```
+
+---
+
+# Type classes: Operator Overloading
+
+With discrete typeclasses
+
+```tut:silent
+trait Business[A] {
+  def apply(a: A): Unit
+}
+object Business {
+  implicit val strBusiness: Business[String] = new Business[String] {
+    def apply(str: String): Unit = println(s"Biz $str!")
+  }
+  implicit val intBusiness: Business[Int] = new Business[Int] {
+    def apply(int: Int): Unit = println(s"Biz ${int + 1}!")
+  }
+
+  def apply[A](a: A)(implicit doBiz: Business[A]): Unit = doBiz.apply(a)
+}
+object SeriousBusiness {
+  implicit val srsbsnsDouble = new Business[Double] {
+    def apply(double: Double): Unit = println(s"Serious business $double")
+  }
+}
+```
+
+---
+
+# Type classes: Operator Overloading
+
+```tut
+doBusiness(new BusinessString("hello"))
+import Business._
+Business("hello")
+import SeriousBusiness._
+Business(1.0)
+```
+
+---
+
 # Be cautious with Type classes here...
 
 1. When dealing with `sealed` traits, it's often more work and more complexity
-2. Sometimes inheritance makes sense, it's easy in Scala
+2. Inheritance makes sense when you control all objects in your domain
 3. If you can't express a law on your type-class, it's probably not a type-class
 4. If the complexity isn't worth the return on investment
 
@@ -882,13 +982,26 @@ It makes sense to use this pattern in a lot of places (you'll see it everywhere 
 # Be cautious with Type classes here...
 
 1. When dealing with `sealed` traits, it's often more work and more complexity
-```scala
-sealed trait RGB
-case object Red extends RGB
-case object Green extends RGB
-case object Blue extends RGB
+
+```tut:silent
+sealed trait RGB { def hex: String }
+case object Red extends RGB { def hex: String = "F00" }
+case object Green extends RGB { def hex: String = "0F0" }
+case object Blue extends RGB { def hex: String = "00F" }
+
+// vs
+
+trait Hex[A] {
+  def value: String
+}
+object Hex {
+  implicit val red = new Hex[Red.type] { def value: String = "F00" }
+  implicit val green = new Hex[Green.type] { def value: String = "0F0" }
+  implicit val blue = new Hex[Blue.type] { def value: String = "0F0" }
+}
 ```
-2. Sometimes inheritance makes sense, it's easy in Scala
+
+2. Inheritance makes sense when you control all objects in your domain
 3. If you can't express a law on your type-class, it's probably not a type-class
 4. If the complexity isn't worth the return on investment
 
@@ -897,13 +1010,7 @@ case object Blue extends RGB
 # Be cautious with Type classes here...
 
 1. When dealing with `sealed` traits, it's often more work and more complexity
-```scala
-sealed trait RGB
-case object Red extends RGB
-case object Green extends RGB
-case object Blue extends RGB
-```
-2. Sometimes inheritance makes sense, it's easy in Scala
+2. Inheritance makes sense when you control all objects in your domain
 3. If you can't express a law on your type-class, it's probably not a type-class
 ```scala
 f.map(identity) <-> f
@@ -918,7 +1025,7 @@ deserialize(serialize(o)) <-> o
 - Returning the "current" type in Scala `this.copy(???)`
 - Getting around F-bounded types `trait Foo[A <: Foo[A]]`
     https://tpolecat.github.io/2015/04/29/f-bounds.html
-- Attaching behavior to any type outside of declaration
+- Attaching generic behavior outside of declaration
 
 ???
 
@@ -995,6 +1102,27 @@ def exclaim[A <: Foo](foo: A): A = foo.update(foo.bar + "!")
 ???
 
 - This fails because the return type of exclaim is not specific enough
+
+---
+
+# Only Type classes
+
+`self.type` is quite a kludge and it doesn't save us from returning the wrong type
+
+```tut:silent
+trait Foo {
+  def bar: String
+  def update(newBar: String): this.type
+}
+class Baz(val bar: String) extends Foo {
+  def update(newBar: String): this.type = new Baz(newBar).asInstanceOf[this.type]
+}
+```
+
+```tut
+class Bar(override val bar: String) extends Baz(bar)
+(new Bar("am I a Baz?")).isInstanceOf[Baz]
+```
 
 ---
 
@@ -1238,18 +1366,18 @@ no you shouldn't do 4
 
 # Type-classes
 
-Remember our `SaferParser` implementation?
+Remember our `SaferDeserialize` implementation?
 
 We now have satisfied two of our constraints...
 
 1. ~~The API should never throw **non-fatal** exceptions~~
-2. ~~Our solution should keep track at **compile-time** which types we can parse~~
+2. ~~Our solution should keep track at **compile-time** which types we can as~~
 3. There should be little boilerplate
 
 ???
 
-1. -- our parsers never throw non-fatal exceptions, because we return a value representing failure in option
-2. -- we let the compiler do the mapping of types to parsers via type classes
+1. -- our deserializers never throw non-fatal exceptions, because we return a value representing failure in option
+2. -- we let the compiler do the mapping of types to deserializers via type classes
 3. -- we still have boilerplate, however, since we have to create instances for every type
 
 ---
@@ -1285,7 +1413,7 @@ case class Account(owner: String, balance: Double)
 ???
 
 - They all seem to be built from types like String, Int, Double
-- What if we could somehow compose smaller parsers into parsers for more complicated case classes?
+- What if we could somehow compose smaller deserializers into deserializers for more complicated case classes?
 
 ---
 # Reducing Boilerplate
@@ -1293,15 +1421,15 @@ case class Account(owner: String, balance: Double)
 Here is what we'd like to be able to do:
 
 ```tut:silent:nofail
-Parser[Person]("Fred,44")
+Deserialize[Person]("Fred,44")
 
 case class Telephone(country: Int, area: Int, rest: Int)
-Parser[Telephone]("1,415,5555555")
+Deserialize[Telephone]("1,415,5555555")
 ```
 
 ???
 
-- we like to be able to make the compiler build parsers for arbitrary case classes if we already have parsers for the types those case classes use
+- we like to be able to make the compiler build deserializers for arbitrary case classes if we already have deserializers for the types those case classes use
 
 ---
 # Reducing Boilerplate
@@ -1322,7 +1450,7 @@ And we want to be able to do this, too:
 
 ```tut:silent:nofail
 case class Contact(person: Person, telephone: Telephone, address: Address)
-Parser[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
+Deserialize[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
 ```
 
 ---
@@ -1332,7 +1460,7 @@ And we want to be able to do this, too:
 
 ```tut:silent:nofail
 case class Contact(person: Person, telephone: Telephone, address: Address)
-Parser[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
+Deserialize[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
 ```
 
 With:
@@ -1409,9 +1537,9 @@ case class Person(name: String, age: Int)
 ```
 
 1. Recursively descend the parameters of the `Person`
-2. Base case: I have an instance of `SaferParser[String]` for `name: String`
-3. Base case: I have an instance of `SaferParser[Int]` for `age: Int`
-4. Build a `SaferParser[Person]` by using the `(SaferParser[String], SaferParser[Int])` instances
+2. Base case: I have an instance of `SaferDeserialize[String]` for `name: String`
+3. Base case: I have an instance of `SaferDeserialize[Int]` for `age: Int`
+4. Build a `SaferDeserialize[Person]` by using the `(SaferDeserialize[String], SaferDeserialize[Int])` instances
 
 ---
 
@@ -1422,10 +1550,10 @@ case class Contact(person: Person, telephone: Telephone, address: Address)
 ```
 
 1. Recursively descend the parameters of the `Contact`
-2. Base case: I have an instance of `SaferParser[Person]` for `name: Person` via induction
-3. Base case: I have an instance of `SaferParser[Telephone]` for `telephone: Telephone` via induction
-3. Base case: I have an instance of `SaferParser[Address]` for `address: Address` via induction
-4. Build a `SaferParser[Contact]` by using the `(SaferParser[Person], SaferParser[Telephone], SaferParser[Address])` instances
+2. Base case: I have an instance of `SaferDeserialize[Person]` for `name: Person` via induction
+3. Base case: I have an instance of `SaferDeserialize[Telephone]` for `telephone: Telephone` via induction
+3. Base case: I have an instance of `SaferDeserialize[Address]` for `address: Address` via induction
+4. Build a `SaferDeserialize[Contact]` by using the `(SaferDeserialize[Person], SaferDeserialize[Telephone], SaferDeserialize[Address])` instances
 
 ---
 
