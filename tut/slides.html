@@ -31,7 +31,7 @@ class: center, middle
 
 Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
 
-16 November 2017 • Scalœ by the Bay
+16 November 2017 • Scale by the Bay
 
 ???
 
@@ -44,19 +44,21 @@ Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
 
 # Special Thanks
 
+- Travis Brown @travisbrown https://meta.plasm.us
+  - "Type classes and generic derivation"
+  - prolific stackoverflow gems
 - Rob Norris @tpolecat https://tpolecat.github.io
   - tut
   - f-bounded types
   - pedagogical mastery
-- Travis Brown @travisbrown https://meta.plasm.us
-  - "Type classes and generic derivation"
-  - prolific stackoverflow gems
+- Jacob Odersky @jodersky
+  - pointing out a workaround with `self.type`
+
 ???
 
 - Before I begin, I wanted to just thank Travis Brown (whos work in the scala community heavily influenced
-me and this talk. In fact, some of the code comes from him)
-- And also Rob Norris, who is a shining example of how to give a technical talk. I hope that I can do
-my best to give this in that spirit.
+me and this talk). His post "Type classes and generic derivation" provided the narrative outline for this talk.
+- And also Rob Norris,  I am using his tut library for these slides and sourced from his f-bounded types post. also, he is a shining example of how to give a technical talk. I hope that I can do my best to give this in that spirit.
 
 ---
 
@@ -93,7 +95,7 @@ case class Account(owner: String, balance: Double)
 
 ---
 
-# API for serialization
+# API for Deserialization
 
 ```tut:silent
 val fred = Deserialize.as[Person]("Fred,44")
@@ -132,17 +134,21 @@ trait RowDeserialize[A] {
   def apply(s: String): A
 }
 
-val accountDeserialize: RowDeserialize[Account] = new RowDeserialize[Account] {
-  def apply(s: String): Account = s.split(",").toList match {
-    case List(owner, balance) => Account(owner, balance.toDouble)
+val accountDeserialize: RowDeserialize[Account] =
+  new RowDeserialize[Account] {
+    def apply(s: String): Account = s.split(",").toList match {
+      case List(owner, balance) =>
+        Account(owner, balance.toDouble)
+    }
   }
-}
 
-val addressDeserialize: RowDeserialize[Address] = new RowDeserialize[Address] {
-  def apply(s: String): Address = s.split(",").toList match {
-    case List(street, city, zip) => Address(street, city, zip.toInt)
+val addressDeserialize: RowDeserialize[Address] =
+  new RowDeserialize[Address] {
+    def apply(s: String): Address = s.split(",").toList match {
+      case List(street, city, zip) =>
+        Address(street, city, zip.toInt)
+    }
   }
-}
 ```
 
 ---
@@ -949,22 +955,29 @@ Lawfulness:
 
 # Type classes
 
-It makes sense to use this pattern in a lot of places (you'll see it everywhere in FP). A non-extensive list is:
+It makes sense to use this pattern in a lot of places (you'll see it everywhere in FP). A non-exhaustive list is:
 
 1. Operator overloading (method overloading)
 2. Generic interfaces, e.g. `trait SomeInterface[A]`, `Numeric[A]`
 3. Generating data, e.g. Scalacheck
-4. Serialization
+4. Serialization, Parsing
 5. As building blocks to other type-safe things, e.g. macros, shapeless
 6. Functional programming with cats/scalaz
 7. When you have a lot of boilerplate matching on types
 
-> In my experience I have never regretted replacing a superclass with a typeclass.
-> -- tpolecat
-
 ???
 
 1. In the end, things like operator overloading might be best done via inheritance.
+
+---
+# Type classes
+
+### "In my experience I have never regretted replacing a superclass with a typeclass."
+> -- Rob Norris
+
+???
+
+Let's take operator overloading as an example
 
 ---
 
@@ -1033,11 +1046,13 @@ import SeriousBusiness._
 Business(1.0)
 ```
 
+???
+
+Now let's take a look at where Type classes don't fit as well the OO parts of scala
+
 ---
 
 # Be cautious with Type classes here...
-
-### Inheritance makes sense when you control all objects in your domain
 
 ```tut:silent
 // inheritance
@@ -1061,6 +1076,11 @@ object Hex {
   implicit val blue = new Hex[Blue.type] { def value: String = "0F0" }
 }
 ```
+
+???
+
+- Inheritance makes sense when you control all objects in your domain
+
 ---
 
 # Be cautious with Type classes here...
@@ -1227,18 +1247,10 @@ The best we can do is return a `Foo`
 ```tut:nofail
 def exclaim[A <: Foo](foo: A): Foo = foo.update(foo.bar + "!")
 ```
----
 
-# Only Type classes: "current" type
+???
 
-`self.type` is quite a kludge and if you need a new instance it requires casting (runtime failure) which defeats the purpose of type-safety
-
-```tut:silent
-trait Foo {
-  def bar: String
-  def update(newBar: String): this.type
-}
-```
+We have to widen to the super-class
 
 ---
 
@@ -1363,6 +1375,10 @@ class Bar(val bar: String) extends Foo[Bar] {
 }
 class FooBar(bar: String) extends Bar(bar) // is Foo[Bar]
 ```
+
+???
+
+What if we replaced the `update` method with a type-class?
 
 ---
 
@@ -1526,12 +1542,16 @@ Arglebargle("poppycock").update("grumble")
 Applesauce("motts").update("grandma's")
 ```
 
+???
+
+Inheritence and interfaces are replaceable with type-classes
+
 ---
 
 # Only not really..
 
 1. Inheritance/Mixin is not a guarantee that you return the correct type
-2. And you can do this with type-classes...
+2. And! You can do this with type-classes...
 
 
 ```tut:nofail:book
@@ -1568,6 +1588,7 @@ hi.update("world")
     * even those you don't control
     * even those not yet written by future users of your code
 4. ~~Completely replace inheritance~~
+5. Sometimes replace inheritance
 
 ???
 
@@ -1660,8 +1681,13 @@ case class Telephone(country: Int, area: Int, rest: Int)
 And we want to be able to do this, too:
 
 ```tut:silent:nofail
-case class Contact(person: Person, telephone: Telephone, address: Address)
-Deserialize[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
+case class Contact(person: Person,
+                   telephone: Telephone,
+                   address: Address)
+
+Deserialize[Contact](
+  "Fred,44,1,415,5555555,123 Bryant,San Francisco,94105"
+)
 ```
 
 ---
@@ -1670,8 +1696,13 @@ Deserialize[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
 And we want to be able to do this, too:
 
 ```tut:silent:nofail
-case class Contact(person: Person, telephone: Telephone, address: Address)
-Deserialize[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
+case class Contact(person: Person,
+                   telephone: Telephone,
+                   address: Address)
+
+Deserialize[Contact](
+  "Fred,44,1,415,5555555,123 Bryant,San Francisco,94105"
+)
 ```
 
 With:
@@ -1770,18 +1801,17 @@ case class Contact(person: Person, telephone: Telephone, address: Address)
 
 # Reducing Boilerplate
 
-So, let's see how we build this...
+So, let's see how we build this with Shapeless
 
 ---
 
 class: center, middle
 
 <h1>oh, wait.. this is a 20 min talk.</h1>
-<h1>go on Saturday morning to see "Playing with Reducing Boilerplate"</h1>
 
 Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
 
-16 November 2017 • Scalœ by the Bay
+16 November 2017 • Scale by the Bay
 
 ---
 
