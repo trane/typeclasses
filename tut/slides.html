@@ -64,8 +64,8 @@ my best to give this in that spirit.
 
 1. Gain an intuition about **type classes**
 2. Learn a bit about type safety and making the **compiler** do some work for you
-3. Gain some confidence in applying the type class pattern in your every day code
-4. Exposure to some other applications of type classes
+3. Gain some **confidence** in applying the type class pattern in your every day code
+4. Exposure to some other **applications** of type classes
 
 ???
 
@@ -113,7 +113,7 @@ val checking = Deserialize.as[Account]("Robert,2222.42")
 
 1. The API should never throw **non-fatal** exceptions
 2. Our solution should keep track at **compile-time** which types we can deserialize
-3. There should be little boilerplate
+3. There should be little **boilerplate**
 
 ???
 
@@ -184,6 +184,14 @@ accountDeserialize("Chris Yang,Not a double")
 1. Allow non-fatal errors to be thrown
 2. Have to keep track of a `RowDeserialize` instance for each type we want to deserialize
 
+```scala
+val accountDeserializer = ???
+val personDeserializer = ???
+val addressDeserializer = ???
+// ... snip
+val seriousBusinessDeserializer = ???
+```
+
 ---
 
 # Problems
@@ -191,6 +199,22 @@ accountDeserialize("Chris Yang,Not a double")
 1. Allow non-fatal errors to be thrown
 2. Have to keep track of a `RowDeserialize` instance for each type we want to deserialize
 3. We have to write a lot of boilerplate
+
+```scala
+val accountDeserialize: RowDeserialize[Account] = new RowDeserialize[Account] {
+  def apply(s: String): Account = s.split(",").toList match {
+    case List(owner, balance) => Account(owner, balance.toDouble)
+  }
+}
+
+val addressDeserialize: RowDeserialize[Address] = new RowDeserialize[Address] {
+  def apply(s: String): Address = s.split(",").toList match {
+    case List(street, city, zip) => Address(street, city, zip.toInt)
+  }
+}
+
+// ... and more
+```
 
 ???
 
@@ -348,7 +372,7 @@ why the operation failed (like bad input or we don't know how to as the type), b
 
 ???
 
-- Since we work with libraries like this, we probably all have a sense of just how annoying this is (like salat)
+- This is the name of an article in our wiki detailing all of the weird behavior of the library
 
 ---
 
@@ -381,7 +405,8 @@ Let's give the type a companion object with an apply method:
 
 ```tut:silent
 object SaferDeserialize {
-  def apply[A](s: String)(izer: SaferDeserialize[A]): Option[A] = izer(s)
+  def apply[A](s: String)(deserialize: SaferDeserialize[A]): Option[A] =
+    deserialize(s)
 }
 ```
 Which let's us write:
@@ -467,6 +492,13 @@ def mapping[A](a: A): Deserialize[A] =
   else throw new RuntimeException("No deserializer found")
 ```
 
+???
+
+That type is also known as a Map, so what if had that?
+
+---
+# Compile-time approach
+
 Or if we had some ability to make a dynamic lookup `Map[_, Deserialize[_]]`...
 
 ```scala
@@ -476,6 +508,33 @@ def mapping[A](mapper: Map[_, Deserialize[_]]): Deserialize[A] =
         .getOrElse(throw new RuntimeException("No deserializer found"))
 ```
 
+???
+
+- the nice part is that if we had this mapping, then if some other user of our code had a new deserializer, they could simply add it to the map
+
+---
+# Compile-time approach
+
+Or if we had some ability to make a dynamic lookup `Map[_, Deserialize[_]]`...
+
+```scala
+def mapping[A](mapper: Map[_, Deserialize[_]]): Deserialize[A] =
+  mapper.find(_.isInstanceOf[A])
+        .map(_.asInstanceOf[Deserialize[A]])
+        .getOrElse(throw new RuntimeException("No deserializer found"))
+```
+
+We could simply add new deserializers as we needed to with some code that looks kind of like this...
+
+```scala
+class Business
+globalMapper.put(Business, new Deserializer[Business] { def apply = ??? })
+```
+
+???
+
+- the nice part is that if we had this mapping, then if some other user of our code had a new deserializer, they could simply add it to the map
+
 ---
 # Compile-time approach
 
@@ -484,6 +543,11 @@ Remember our `SaferDeserialize`?
 ```tut:silent
 trait SaferDeserialize[A] {
   def apply(s: String): Option[A]
+}
+
+object SaferDeserialize {
+  def apply[A](s: String)(deserialize: SaferDeserialize[A]): Option[A] =
+    deserialize(s)
 }
 
 val account: SaferDeserialize[Account] = new SaferDeserialize[Account] {
@@ -527,6 +591,7 @@ object SaferDeserialize {
       case _ => None
     }
   }
+
   val address: SaferDeserialize[Address] = new SaferDeserialize[Address] {
     def apply(s: String): Option[Address] = s.split(",").toList match {
       case List(street, city, zip) =>
@@ -972,24 +1037,20 @@ Business(1.0)
 
 # Be cautious with Type classes here...
 
-1. When dealing with `sealed` traits, it's often more work and more complexity
-2. Inheritance makes sense when you control all objects in your domain
-3. If you can't express a law on your type-class, it's probably not a type-class
-4. If the complexity isn't worth the return on investment
-
----
-
-# Be cautious with Type classes here...
-
-1. When dealing with `sealed` traits, it's often more work and more complexity
+### Inheritance makes sense when you control all objects in your domain
 
 ```tut:silent
+// inheritance
 sealed trait RGB { def hex: String }
 case object Red extends RGB { def hex: String = "F00" }
 case object Green extends RGB { def hex: String = "0F0" }
 case object Blue extends RGB { def hex: String = "00F" }
 
-// vs
+// type-class
+sealed trait RGB
+case object Red extends RGB
+case object Green extends RGB
+case object Blue extends RGB
 
 trait Hex[A] {
   def value: String
@@ -1000,23 +1061,65 @@ object Hex {
   implicit val blue = new Hex[Blue.type] { def value: String = "0F0" }
 }
 ```
+---
 
-2. Inheritance makes sense when you control all objects in your domain
-3. If you can't express a law on your type-class, it's probably not a type-class
-4. If the complexity isn't worth the return on investment
+# Be cautious with Type classes here...
+
+### If you can't express a law on your type-class, it's probably not a type-class
+
+```scala
+f.map(identity) <-> f
+deserialize(serialize(o)) <-> o
+```
 
 ---
 
 # Be cautious with Type classes here...
 
-1. When dealing with `sealed` traits, it's often more work and more complexity
-2. Inheritance makes sense when you control all objects in your domain
-3. If you can't express a law on your type-class, it's probably not a type-class
-```scala
-f.map(identity) <-> f
-deserialize(serialize(o)) <-> o
+### When you know all the types that will ever need the functionality
+
+```tut:silent
+// interface
+trait Describable { def desc: String }
+object DomainObject1 extends Describable { val desc = "domain object 1" }
+object DomainObject2 extends Describable { val desc = "domain object 2" }
+
+// type-class
+object DomainObject1
+object DomainObject2
+
+trait Describe[A] { def desc: String }
+object Describe {
+  implicit val object1 =
+    new Describe[DomainObject1.type] { def desc: String = ??? }
+  implicit val object2 =
+    new Describe[DomainObject2.type] { def desc: String = ??? }
+}
+
 ```
-4. If the complexity isn't worth the return on investment
+---
+
+# Be cautious with Type classes here...
+
+### If you start writing a type-class with a subclassing type-parameter, you might want plain subclassing
+
+```tut:silent
+trait Pet { def name: String }
+case class Cat(name: String) extends Pet
+case class Dog(name: String) extends Pet
+
+// type-class
+trait Greet[A <: Pet] {
+  def apply(pet: A): String
+}
+object Greet {
+  implicit val catGreet: Greet[Cat] = ???
+  implicit val dogGreet: Greet[Dog] = ???
+}
+
+// regular method
+def greet[A <: Pet](pet: A): String = s"Hello ${pet.name}"
+```
 
 ---
 
@@ -1034,7 +1137,7 @@ deserialize(serialize(o)) <-> o
 
 ---
 
-# When Type classes are really the only option
+# Only Type classes: "current" type
 
 Returning the "current" type in Scala
 
@@ -1051,7 +1154,7 @@ case class Baz(bar: String) extends Foo {
 
 ---
 
-# Only Type classes
+# Only Type classes: "current" type
 
 Returning the "current" type in Scala
 
@@ -1079,7 +1182,7 @@ val q2 = q.update("World")
 
 ---
 
-# Only Type classes
+# Only Type classes: "current" type
 
 Returning the "current" type in Scala
 
@@ -1105,28 +1208,7 @@ def exclaim[A <: Foo](foo: A): A = foo.update(foo.bar + "!")
 
 ---
 
-# Only Type classes
-
-`self.type` is quite a kludge and it doesn't save us from returning the wrong type
-
-```tut:silent
-trait Foo {
-  def bar: String
-  def update(newBar: String): this.type
-}
-class Baz(val bar: String) extends Foo {
-  def update(newBar: String): this.type = new Baz(newBar).asInstanceOf[this.type]
-}
-```
-
-```tut
-class Bar(override val bar: String) extends Baz(bar)
-(new Bar("am I a Baz?")).isInstanceOf[Baz]
-```
-
----
-
-# Only Type classes
+# Only Type classes: "current" type
 
 Returning the "current" type in Scala
 
@@ -1147,7 +1229,144 @@ def exclaim[A <: Foo](foo: A): Foo = foo.update(foo.bar + "!")
 ```
 ---
 
-# Only Type classes
+# Only Type classes: "current" type
+
+`self.type` is quite a kludge and if you need a new instance it requires casting (runtime failure) which defeats the purpose of type-safety
+
+```tut:silent
+trait Foo {
+  def bar: String
+  def update(newBar: String): this.type
+}
+```
+
+---
+
+# Only Type classes: "current" type
+
+`self.type` might be the way
+
+```tut:silent
+trait Foo {
+  def bar: String
+  def update(newBar: String): this.type
+}
+```
+
+---
+
+# Only Type classes: "current" type
+
+`self.type` might be the way
+
+```tut:silent
+trait Foo {
+  def bar: String
+  def update(newBar: String): this.type
+}
+```
+
+But, this doesn't work...
+```tut:fail
+case class Baz(bar: String) extends Foo {
+  def update(newBar: String): this.type = copy(bar = newBar)
+}
+```
+---
+
+# Only Type classes: "current" type
+
+
+So, you have to cast, which defeats the purpose of type-safety
+```tut:silent
+case class Baz(bar: String) extends Foo {
+  def update(newBar: String): this.type =
+    copy(bar = newBar).asInstanceOf[this.type]
+}
+class Bar(override val bar: String) extends Baz(bar) {
+  override def update(newBar: String): this.type =
+    Baz(newBar).asInstanceOf[this.type]
+}
+```
+
+```tut:fail
+(new Bar("i'm a bar")).update("now i'm a baz, but i crash at runtime")
+```
+
+---
+
+# Only Type classes: F-bounded type
+
+F-bounded type with `self.type` has an strange syntax that gets you back some type-safety
+
+```tut:reset:silent
+trait Foo[A <: Foo[A]] { this: A =>
+  def bar: String
+  def update(newBar: String): A
+}
+
+case class Baz(bar: String) extends Foo[Baz] {
+  def update(newBar: String): Baz = copy(bar = newBar)
+}
+
+def exclaim[A <: Foo[A]](foo: A): A = foo.update(foo.bar + "!")
+```
+
+```tut
+exclaim(Baz("hello world"))
+```
+
+???
+
+- An F-bounded type is parameterized over its own subtypes, so we can pass an implementing type as an argument to the superclass
+---
+
+# Only Type classes: F-bounded type
+
+F-bounded type with `self.type` has an strange syntax that gets you back some type-safety
+
+```tut:reset:silent
+trait Foo[A <: Foo[A]] { this: A =>
+  def bar: String
+  def update(newBar: String): A
+}
+
+case class Baz(bar: String) extends Foo[Baz] {
+  def update(newBar: String): Baz = copy(bar = newBar)
+}
+```
+Now this fails properly
+```tut:fail
+case class Bar(bar: String) extends Foo[Baz]
+```
+
+---
+
+# Only Type classes: F-bounded type
+
+`self.type` still doesn't get you all the way there
+
+```tut:reset:silent
+trait Foo[A <: Foo[A]] { this: A =>
+  def bar: String
+  def update(newBar: String): A
+}
+
+case class Baz(bar: String) extends Foo[Baz] {
+  def update(newBar: String): Baz = copy(bar = newBar)
+}
+```
+Now we have gotten away from `self.type`
+```tut:silent
+class Bar(val bar: String) extends Foo[Bar] {
+  def update(newBar: String) = new Bar(newBar)
+}
+class FooBar(bar: String) extends Bar(bar) // is Foo[Bar]
+```
+
+---
+
+# Only Type classes: F-bounded type
 
 Returning the "current" type in Scala
 
@@ -1161,7 +1380,7 @@ trait Update[A] {
 ```
 ---
 
-# Only Type classes
+# Only Type classes: F-bounded type
 
 Returning the "current" type in Scala
 
@@ -1176,7 +1395,7 @@ trait Update[A] {
 
 Now we can define `Baz` and an *instance* of `Update[Baz]`
 
-```tut:nofail:book
+```tut:nofail:book:silent
 object mainapp {
   case class Baz(bar: String) extends Foo
   object Baz {
@@ -1188,7 +1407,7 @@ object mainapp {
 ```
 ---
 
-# Only Type classes
+# Only Type classes: F-bounded type
 
 Returning the "current" type in Scala
 
@@ -1200,17 +1419,9 @@ implicitly[Update[Baz]].update(b, "world")
 
 ---
 
-# Only Type classes
+# Only Type classes: behavior outside declaration
 
-Returning the "current" type in Scala
-
-```tut:nofail:book
-import mainapp._
-val b = Baz("Hello")
-implicitly[Update[Baz]].update(b, "world")
-```
-
-And we can make it more OO-friendly
+And we can add behavior as inline methods
 
 ```tut:nofail:book
 implicit class UpdateOps[A](a: A)(implicit e: Update[A]) {
@@ -1465,12 +1676,12 @@ Deserialize[Contact]("Fred,44,1,415,5555555,123 Bryant,San Francisco,94105")
 
 With:
 1. No exceptions
-2. No boilerplate
-3. No runtime reflection
+2. No runtime reflection
+3. No boilerplate
 
 ---
 
-# Shapeless
+# Reducing Boilerplate
 
 ```tut:silent:nofail
 case class Person(name: String, age: Int)
@@ -1486,7 +1697,7 @@ Take a look at our case classes, what is their shape?
 
 ---
 
-# Shapeless
+# Reducing Boilerplate
 
 ```tut:silent:nofail
 case class Person(name: String, age: Int)
@@ -1505,7 +1716,7 @@ case class Contact(person: Person, telephone: Telephone, address: Address)
 
 ---
 
-# Shapeless
+# Reducing Boilerplate
 
 ```tut:silent:nofail
 // (String, Int)
@@ -1520,17 +1731,17 @@ case class Contact(person: Person, telephone: Telephone, address: Address)
 
 ---
 
-# Shapeless
+# Reducing Boilerplate
 
 `String` and `Int`
 
 ???
 
-- Shapeless allows us to build up structures via induction
+- Reducing Boilerplate allows us to build up structures via induction
 
 ---
 
-# Shapeless
+# Reducing Boilerplate
 
 ```tut:silent:nofail
 case class Person(name: String, age: Int)
@@ -1543,7 +1754,7 @@ case class Person(name: String, age: Int)
 
 ---
 
-# Shapeless
+# Reducing Boilerplate
 
 ```tut:silent:nofail
 case class Contact(person: Person, telephone: Telephone, address: Address)
@@ -1557,7 +1768,7 @@ case class Contact(person: Person, telephone: Telephone, address: Address)
 
 ---
 
-# Shapeless
+# Reducing Boilerplate
 
 So, let's see how we build this...
 
@@ -1565,11 +1776,12 @@ So, let's see how we build this...
 
 class: center, middle
 
-<h1>Or... maybe this is a good unmeetup idea</h1>
+<h1>oh, wait.. this is a 20 min talk.</h1>
+<h1>go on Saturday morning to see "Playing with Reducing Boilerplate"</h1>
 
 Andrew Kuhnhausen • `@kuhnhausen` • Domino Data Lab
 
-16 May 2017 • SF Scala (un)Meetup
+16 November 2017 • Scalœ by the Bay
 
 ---
 
